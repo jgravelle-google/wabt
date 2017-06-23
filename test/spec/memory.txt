@@ -31,8 +31,7 @@ out/third_party/testsuite/memory.wast:54: assert_invalid passed:
   error: grow_memory requires an imported or defined memory.
   error: @0x0000001b: OnGrowMemoryExpr callback failed
 out/third_party/testsuite/memory.wast:59: assert_invalid passed:
-  error: type mismatch in data segment, expected i32 but got i64
-  error: @0x00000015: OnDataSegmentData callback failed
+  error: @0x00000013: expected i32 init_expr
 out/third_party/testsuite/memory.wast:63: assert_invalid passed:
   error: @0x00000014: expected END opcode after initializer expression
 out/third_party/testsuite/memory.wast:67: assert_invalid passed:
