@@ -276,10 +276,15 @@ Result BinaryReader::ReportUnexpectedOpcode(Opcode opcode,
 
 Result BinaryReader::ReadOpcode(Opcode* out_value, const char* desc) {
   uint8_t value = 0;
-  if (Failed(ReadU8(&value, desc))) {
-    return Result::Error;
+  CHECK_RESULT(ReadU8(&value, desc));
+
+  if (Opcode::IsPrefixByte(value)) {
+    uint32_t code;
+    CHECK_RESULT(ReadU32Leb128(&code, desc));
+    *out_value = Opcode::FromCode(value, code);
+  } else {
+    *out_value = Opcode::FromCode(value);
   }
-  *out_value = Opcode::FromCode(value);
   return Result::Ok;
 }
 
@@ -1053,6 +1058,18 @@ Result BinaryReader::ReadFunctionBody(Offset end_offset) {
         CALLBACK(OnOpcodeIndex, index);
         break;
       }
+
+      case Opcode::I32TruncSSatF32:
+      case Opcode::I32TruncUSatF32:
+      case Opcode::I32TruncSSatF64:
+      case Opcode::I32TruncUSatF64:
+      case Opcode::I64TruncSSatF32:
+      case Opcode::I64TruncUSatF32:
+      case Opcode::I64TruncSSatF64:
+      case Opcode::I64TruncUSatF64:
+        CALLBACK(OnConvertExpr, opcode);
+        CALLBACK0(OnOpcodeBare);
+        break;
 
       default:
         return ReportUnexpectedOpcode(opcode);
