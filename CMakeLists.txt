@@ -27,6 +27,8 @@ option(USE_UBSAN "Use undefined behavior sanitizer" OFF)
 option(CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(WITH_EXCEPTIONS "Build with exceptions enabled" OFF)
 
+find_package(LLVM PATHS ../llvm-out/lib/cmake/llvm/ NO_DEFAULT_PATH)
+
 if (${CMAKE_C_COMPILER_ID} STREQUAL "Clang")
   set(COMPILER_IS_CLANG 1)
   set(COMPILER_IS_GNU 0)
@@ -101,8 +103,9 @@ else ()
   #   interfaces, etc.
   # disable -Wpointer-arith: this is a GCC extension, and doesn't work in MSVC.
   add_definitions(
-    -Wall -Wextra -Werror -Wno-unused-parameter -Wpointer-arith -g -std=c++11
-    -Wold-style-cast -Wuninitialized
+#    -Wall -Wextra -Werror -Wno-unused-parameter -Wpointer-arith
+    -g -std=c++11
+#    -Wold-style-cast -Wuninitialized
   )
 
   if (NOT WITH_EXCEPTIONS)
@@ -269,6 +272,11 @@ add_library(libwabt STATIC
 )
 set_target_properties(libwabt PROPERTIES OUTPUT_NAME wabt)
 
+add_library(libllvm SHARED IMPORTED)
+set_target_properties(libllvm PROPERTIES
+  IMPORTED_LOCATION ../llvm-out/lib/libLLVM.dylib
+)
+
 if (NOT EMSCRIPTEN)
   if (CODE_COVERAGE)
     add_definitions("-fprofile-arcs -ftest-coverage")
@@ -297,6 +305,16 @@ if (NOT EMSCRIPTEN)
 
   # wast2wasm
   wabt_executable(wast2wasm src/tools/wast2wasm.cc)
+
+  # wast2ir
+  add_definitions(${LLVM_DEFINITIONS})
+  wabt_executable(wast2ir src/tools/wast2ir.cc)
+  target_link_libraries(wast2ir libllvm)
+  target_include_directories(wast2ir PUBLIC ${LLVM_INCLUDE_DIRS})
+#  target_include_directories(wast2ir PUBLIC
+#    ../llvm-out/include
+#    ../llvm/include
+#  )
 
   # wasm2wast
   wabt_executable(wasm2wast src/tools/wasm2wast.cc)
