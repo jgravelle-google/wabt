@@ -112,9 +112,7 @@ public:
 
 private:
   Result VisitFunc(Func* func) {
-    llvm::FunctionType* funcType = ToLLVMFuncType(func);
-    llvm::Constant* c = ir->getOrInsertFunction(func->name, funcType);
-    currentFunction = llvm::cast<llvm::Function>(c);
+    currentFunction = ToLLVMFunction(func);
     currentFunc = func;
 
     bool isImport = func->name == "$puts"; // TODO: detect this properly
@@ -127,6 +125,13 @@ private:
     builder.SetInsertPoint(bb);
     visitor.VisitFunc(func);
     return Result::Ok;
+  }
+
+  llvm::Function* ToLLVMFunction(Func* func) {
+    llvm::FunctionType* funcType = ToLLVMFuncType(func);
+    llvm::Constant* c =
+      ir->getOrInsertFunction(func->name.c_str() + 1, funcType);
+    return llvm::cast<llvm::Function>(c);
   }
 
   llvm::FunctionType* ToLLVMFuncType(Func* func) {
@@ -188,8 +193,19 @@ public:
       builder.CreateRetVoid();
       return Result::Ok;
     }
-    StackSlot slot = stack.Pop();
-    builder.CreateRet(slot.value);
+    builder.CreateRet(stack.Pop().value);
+    return Result::Ok;
+  }
+
+  Result OnCallExpr(CallExpr* call) override {
+    Var var = call->var;
+    Func* func = module->funcs[var.index()];
+    llvm::Function* function = ToLLVMFunction(func);
+    std::vector<llvm::Value*> args;
+    for (int i = 0; i < func->GetNumParams(); ++i) {
+      args.push_back(stack.Pop().value);
+    }
+    builder.CreateCall(function, args);
     return Result::Ok;
   }
 };
