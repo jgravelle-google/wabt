@@ -131,7 +131,13 @@ private:
 
   llvm::FunctionType* ToLLVMFuncType(Func* func) {
     llvm::Type* retType = ReturnType(func);
-    llvm::FunctionType* funcType = llvm::FunctionType::get(retType, {}, false);
+    std::vector<llvm::Type*> argTypes;
+    for (int i = 0; i < func->GetNumParams(); ++i) {
+      Type ty = func->GetParamType(i);
+      argTypes.push_back(ToLLVMType(ty));
+    }
+    llvm::FunctionType* funcType =
+      llvm::FunctionType::get(retType, argTypes, false);
     return funcType;
   }
 
