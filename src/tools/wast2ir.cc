@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "config.h"
 
@@ -49,14 +50,40 @@ using namespace wabt;
       return Result::Error; \
   } while (0)
 
+struct StackSlot {
+  Expr* expr;
+  llvm::Value* value;
+};
+
+class ExprStack {
+private:
+  std::vector<StackSlot> data;
+
+public:
+  void Push(StackSlot slot) {
+    data.push_back(slot);
+  }
+  StackSlot Pop() {
+    if (data.size() == 0) {
+      WABT_FATAL("Popping an empty stack\n");
+    }
+    StackSlot ret = data[data.size() - 1];
+    data.pop_back();
+    return ret;
+  }
+};
+
 class IRVisitor : public ExprVisitor::DelegateNop {
 public:
   llvm::Module* ir;
   llvm::LLVMContext context;
   llvm::IRBuilder<> builder;
+  llvm::Function* currentFunction;
 
   Module* module;
+  Func* currentFunc;
   ExprVisitor visitor;
+  ExprStack stack;
 
   IRVisitor() : builder(context), visitor(this) {
     ir = new llvm::Module("test", context);
@@ -87,6 +114,18 @@ private:
   Result VisitFunc(Func* func) {
     llvm::FunctionType* funcType = ToLLVMFuncType(func);
     llvm::Constant* c = ir->getOrInsertFunction(func->name, funcType);
+    currentFunction = llvm::cast<llvm::Function>(c);
+    currentFunc = func;
+
+    bool isImport = func->name == "$puts"; // TODO: detect this properly
+    if (isImport) {
+      return Result::Ok;
+    }
+
+    llvm::BasicBlock* bb =
+      llvm::BasicBlock::Create(context, "entry", currentFunction);
+    builder.SetInsertPoint(bb);
+    visitor.VisitFunc(func);
     return Result::Ok;
   }
 
@@ -118,6 +157,34 @@ private:
     default:
       WABT_FATAL("Unsupported wasm->llvm type: %d\n", type);
     };
+  }
+
+public:
+  Result OnConstExpr(ConstExpr* c) override {
+    Const const_ = c->const_;
+    llvm::Value* value;
+    switch (const_.type) {
+    case Type::I32:
+      value = builder.getInt32(const_.u32);
+      break;
+    case Type::I64:
+      value = builder.getInt64(const_.u64);
+      break;
+    default:
+      WABT_FATAL("Unsupported const expr type: %d\n", const_.type);
+    };
+    stack.Push({c, value});
+    return Result::Ok;
+  }
+
+  Result OnReturnExpr(ReturnExpr* ret) override {
+    if (currentFunc->GetNumResults() == 0) {
+      builder.CreateRetVoid();
+      return Result::Ok;
+    }
+    StackSlot slot = stack.Pop();
+    builder.CreateRet(slot.value);
+    return Result::Ok;
   }
 };
 
