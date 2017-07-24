@@ -95,22 +95,55 @@ public:
   Result VisitModule(Module* module_) {
     module = module_;
 
+    CHECK_RESULT(CreateInitMemoryFunction());
+
+    for (Func* func : module->funcs) {
+      CHECK_RESULT(VisitFunc(func));
+    }
     // for (Index i = 0; i < module->globals.size(); ++i)
     //   CHECK_RESULT(VisitGlobal(i, module->globals[i]));
     // for (Index i = 0; i < module->func_types.size(); ++i)
     //   CHECK_RESULT(VisitFuncType(i, module->func_types[i]));
-    for (Func* func : module->funcs) {
-      CHECK_RESULT(VisitFunc(func));
-    }
     // for (Index i = 0; i < module->tables.size(); ++i)
     //   CHECK_RESULT(VisitTable(i, module->tables[i]));
-    // for (Index i = 0; i < module->memories.size(); ++i)
-    //   CHECK_RESULT(VisitMemory(i, module->memories[i]));
 
     return Result::Ok;
   }
 
 private:
+
+  Result CreateInitMemoryFunction() {
+    assert(module->memories.size() == 1);
+
+    llvm::GlobalVariable* memory = LinearMemory();
+    // memory->setSection(".membase");
+    long memorySize = 10000000; // TODO: based on memory declaration
+    memory->setInitializer(
+      llvm::Constant::getNullValue(
+        llvm::ArrayType::get(builder.getInt8Ty(), memorySize)));
+
+    llvm::Function* function = GetMemoryInitFunction();
+    llvm::BasicBlock* bb =
+      llvm::BasicBlock::Create(context, "entry", function);
+    builder.SetInsertPoint(bb);
+    builder.CreateRetVoid();
+    return Result::Ok;
+  }
+
+  llvm::Function* GetMemoryInitFunction() {
+    llvm::Constant* c = ir->getOrInsertFunction(
+      "___initializeWasmLinearMemory", llvm::Type::getVoidTy(context));
+    return llvm::cast<llvm::Function>(c);
+  }
+
+  llvm::GlobalVariable* LinearMemory() {
+    long memorySize = 10000000; // TODO: based on memory declaration
+    llvm::ArrayType* array =
+      llvm::ArrayType::get(builder.getInt8Ty(), memorySize);
+    llvm::Constant* c = ir->getOrInsertGlobal("___wasmLinearMemory", array);
+    return llvm::cast<llvm::GlobalVariable>(c);
+  }
+
   Result VisitFunc(Func* func) {
     currentFunction = ToLLVMFunction(func);
     currentFunc = func;
@@ -123,6 +156,11 @@ private:
     llvm::BasicBlock* bb =
       llvm::BasicBlock::Create(context, "entry", currentFunction);
     builder.SetInsertPoint(bb);
+
+    if (func->name == "$main") {
+      builder.CreateCall(GetMemoryInitFunction());
+    }
+
     visitor.VisitFunc(func);
     return Result::Ok;
   }
@@ -171,6 +209,23 @@ private:
   }
 
 public:
+  Result OnCallExpr(CallExpr* call) override {
+    Var var = call->var;
+    Func* func = module->funcs[var.index()];
+    llvm::Function* function = ToLLVMFunction(func);
+    std::vector<llvm::Value*> args;
+    for (int i = 0; i < func->GetNumParams(); ++i) {
+      llvm::Value* value = stack.Pop().value;
+      llvm::Value* gep = builder.CreateGEP(LinearMemory(), value);
+      llvm::Value* cast = builder.CreateBitCast(gep, builder.getInt8PtrTy());
+      llvm::Value* ptoi = builder.CreatePtrToInt(cast, value->getType());
+      args.push_back(ptoi);
+    }
+    llvm::Value* value = builder.CreateCall(function, args);
+    stack.Push({call, value});
+    return Result::Ok;
+  }
+
   Result OnConstExpr(ConstExpr* c) override {
     Const const_ = c->const_;
     llvm::Value* value;
@@ -188,24 +243,17 @@ public:
     return Result::Ok;
   }
 
+  Result OnDropExpr(DropExpr* drop) override {
+    stack.Pop();
+    return Result::Ok;
+  }
+
   Result OnReturnExpr(ReturnExpr* ret) override {
     if (currentFunc->GetNumResults() == 0) {
       builder.CreateRetVoid();
       return Result::Ok;
     }
     builder.CreateRet(stack.Pop().value);
-    return Result::Ok;
-  }
-
-  Result OnCallExpr(CallExpr* call) override {
-    Var var = call->var;
-    Func* func = module->funcs[var.index()];
-    llvm::Function* function = ToLLVMFunction(func);
-    std::vector<llvm::Value*> args;
-    for (int i = 0; i < func->GetNumParams(); ++i) {
-      args.push_back(stack.Pop().value);
-    }
-    builder.CreateCall(function, args);
     return Result::Ok;
   }
 };
